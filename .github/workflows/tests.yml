@@ -157,3 +157,18 @@ jobs:
             -H 'Content-Type: application/json' \
             "https://packagist.org/api/update-package?username=paulocastellano&apiToken=${{ secrets.PACKAGIST_TOKEN }}" \
             -d '{"repository":{"url":"https://github.com/paulocastellano/laravel-database-backup"}}'
+
+  ci:
+    if: always()
+    needs: [tests, databases]
+    runs-on: ubuntu-latest
+
+    name: ci
+
+    steps:
+      - name: Every test job passed
+        run: |
+          if [ "${{ needs.tests.result }}" != "success" ] || [ "${{ needs.databases.result }}" != "success" ]; then
+            echo "tests: ${{ needs.tests.result }}, databases: ${{ needs.databases.result }}"
+            exit 1
+          fi
