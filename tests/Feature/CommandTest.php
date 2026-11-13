@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use PauloCastellano\DatabaseBackup\Console\Commands\DatabaseBackupCommand;
 use PauloCastellano\DatabaseBackup\DatabaseBackup;
+use PauloCastellano\DatabaseBackup\Exceptions\DatabaseBackupException;
 use PauloCastellano\DatabaseBackup\Mail\BackupFailed;
 use PauloCastellano\DatabaseBackup\Mail\BackupSucceeded;
 
@@ -54,7 +55,7 @@ test('a failed backup is announced by email and on discord, and the command stil
     Http::fake();
     Process::fake(['*' => Process::result(errorOutput: 'connection refused', exitCode: 1)]);
 
-    expect(fn () => $this->artisan('backup:database')->run())->toThrow(RuntimeException::class, 'connection refused');
+    expect(fn () => $this->artisan('backup:database')->run())->toThrow(DatabaseBackupException::class, 'connection refused');
 
     Mail::assertSent(BackupFailed::class, fn (BackupFailed $mail): bool => $mail->hasTo('ops@example.com') && str_contains($mail->error, 'connection refused'));
     Mail::assertNotSent(BackupSucceeded::class);
@@ -68,10 +69,22 @@ test('a missing bucket fails before dumping and is announced', function (): void
     Http::fake();
     Process::fake();
 
-    expect(fn () => $this->artisan('backup:database')->run())->toThrow(RuntimeException::class, 'BACKUP_BUCKET');
+    expect(fn () => $this->artisan('backup:database')->run())->toThrow(DatabaseBackupException::class, 'BACKUP_BUCKET');
 
     Process::assertNothingRan();
     Mail::assertSent(BackupFailed::class, fn (BackupFailed $mail): bool => str_contains($mail->error, 'BACKUP_BUCKET'));
+});
+
+test('a long error is cut to fit a discord embed field, and sent whole by email', function (): void {
+    Mail::fake();
+    Http::fake();
+    $error = str_repeat('pg_dump: error: ', 200);
+    Process::fake(['*' => Process::result(errorOutput: $error, exitCode: 1)]);
+
+    expect(fn () => $this->artisan('backup:database')->run())->toThrow(DatabaseBackupException::class);
+
+    Http::assertSent(fn (Request $request): bool => mb_strlen((string) $request['embeds'][0]['fields'][2]['value']) <= 1024);
+    Mail::assertSent(BackupFailed::class, fn (BackupFailed $mail): bool => str_contains($mail->error, trim($error)));
 });
 
 test('nothing is announced when no email or discord webhook is set', function (): void {
@@ -98,19 +111,23 @@ test('a notification that fails neither fails the backup nor stops the other not
     expect(Storage::disk(DatabaseBackup::DISK)->allFiles())->toHaveCount(1);
 });
 
-test('the schedule runs the backup every configured hours, in UTC, only when backups are enabled', function (bool $enabled): void {
+test('the schedule runs the backup every configured hours, in UTC, only when backups are enabled', function (bool $enabled, int $hours, string $cron): void {
     config()->set('laravel-database-backup.enabled', $enabled);
+    config()->set('laravel-database-backup.interval_hours', $hours);
 
     $event = collect(app(Schedule::class)->events())
         ->first(fn (Event $event): bool => str_contains((string) $event->command, 'backup:database'));
 
     expect($event)->not->toBeNull()
-        ->and($event->expression)->toBe('0 */6 * * *')
+        ->and($event->expression)->toBe($cron)
         ->and($event->timezone)->toBe('UTC')
         ->and($event->withoutOverlapping)->toBeTrue()
         ->and($event->onOneServer)->toBeTrue()
         ->and($event->filtersPass(app()))->toBe($enabled);
-})->with([true, false]);
+})->with([true, false])->with([
+    'the default' => [6, '0 */6 * * *'],
+    'every 4 hours' => [4, '0 */4 * * *'],
+]);
 
 test('the command is registered as backup:database', function (): void {
     expect(Artisan::all())->toHaveKey('backup:database')

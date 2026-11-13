@@ -48,9 +48,14 @@ BACKUP_SECRET_ACCESS_KEY=
 
 BACKUP_NOTIFY_EMAIL=ops@example.com
 BACKUP_NOTIFY_DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+
+BACKUP_DB_CONNECTION=              # optional: the connection to dump, else the default one
+BACKUP_TIMEOUT=3600                # optional: seconds the dump may take
 ```
 
 `BACKUP_ENDPOINT` picks the provider; leave it empty for Amazon S3. The scheduler must be running (`php artisan schedule:run` every minute), as for any Laravel scheduled task.
+
+The email goes through your app's mailer (`MAIL_*`). The dump is written to the system temporary directory (`TMPDIR`), readable by its owner only, before it is uploaded and deleted, so that directory needs room for one compressed dump.
 
 ## Usage
 
@@ -66,7 +71,7 @@ Each run:
 2. deletes the backups in `BACKUP_DIRECTORY` older than `BACKUP_KEEP_DAYS`. The directory belongs to the backups alone; the rest of the bucket is never listed;
 3. sends the result to `BACKUP_NOTIFY_EMAIL` and the Discord webhook. Either left blank is skipped, and a notification that fails never fails the backup.
 
-A failed run (a missing bucket or directory, a dump error, an upload error) exits with an error, is reported like any exception, and is announced by email and on Discord. The email is sent at once, not queued, so you hear about it even when your queue workers are down.
+A failed run (a missing bucket or directory, a dump error, an upload error) throws `PauloCastellano\DatabaseBackup\Exceptions\DatabaseBackupException` or the filesystem's own exception, exits with an error, is reported like any exception, and is announced by email and on Discord. The email is sent at once, not queued, so you hear about it even when your queue workers are down.
 
 ### Restoring a backup
 

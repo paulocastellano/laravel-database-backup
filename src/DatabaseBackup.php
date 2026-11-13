@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use League\Flysystem\StorageAttributes;
-use RuntimeException;
+use PauloCastellano\DatabaseBackup\Exceptions\DatabaseBackupException;
 use Symfony\Component\Process\Process as SymfonyProcess;
 
 class DatabaseBackup
@@ -21,8 +21,6 @@ class DatabaseBackup
      * The filesystem disk the package registers from its `disk` config.
      */
     public const string DISK = 'laravel-database-backup';
-
-    private const int TIMEOUT_SECONDS = 3600;
 
     /**
      * Dumps the connection with the engine's own tool, gzips the output while
@@ -35,26 +33,27 @@ class DatabaseBackup
     public function backup(?string $connectionName = null): array
     {
         if (blank(config('laravel-database-backup.disk.bucket'))) {
-            throw new RuntimeException('Set BACKUP_BUCKET to the bucket the backups go to.');
+            throw new DatabaseBackupException('Set BACKUP_BUCKET to the bucket the backups go to.');
         }
 
         $directory = $this->directory();
         $connection = DB::connection($connectionName ?? config('laravel-database-backup.connection'));
         [$command, $environment] = $this->dumpCommand($connection);
 
-        $random = Str::random(40);
-        $temporaryPath = sys_get_temp_dir()."/database-backup-{$random}.sql.gz";
+        $temporaryPath = $this->createTemporaryFile();
         $gzip = gzopen($temporaryPath, 'wb6');
         $errorOutput = '';
 
         if ($gzip === false) {
-            throw new RuntimeException("Could not open {$temporaryPath} to write the backup.");
+            File::delete($temporaryPath);
+
+            throw new DatabaseBackupException("Could not open {$temporaryPath} to write the backup.");
         }
 
         try {
             try {
                 $result = Process::env($environment)
-                    ->timeout(self::TIMEOUT_SECONDS)
+                    ->timeout((int) config('laravel-database-backup.timeout'))
                     ->quietly()
                     ->start($command, function (string $type, string $output) use ($gzip, &$errorOutput): void {
                         if ($type === SymfonyProcess::OUT) {
@@ -71,7 +70,7 @@ class DatabaseBackup
             if ($result->failed()) {
                 $errors = Str::trim($errorOutput);
 
-                throw new RuntimeException("{$command[0]} failed with exit code {$result->exitCode()}: {$errors}");
+                throw new DatabaseBackupException("{$command[0]} failed with exit code {$result->exitCode()}: {$errors}");
             }
 
             $filename = now('UTC')->format('YmdHis');
@@ -127,7 +126,7 @@ class DatabaseBackup
         $directory = trim((string) config('laravel-database-backup.directory'), '/');
 
         if (blank($directory)) {
-            throw new RuntimeException('Set BACKUP_DIRECTORY to the directory of the bucket the backups go to.');
+            throw new DatabaseBackupException('Set BACKUP_DIRECTORY to the directory of the bucket the backups go to.');
         }
 
         return $directory;
@@ -141,6 +140,21 @@ class DatabaseBackup
         $hours = max(1, min(24, $hours));
 
         return "0 */{$hours} * * *";
+    }
+
+    /**
+     * The dump holds the whole database, so its temporary file is readable by
+     * its owner only, never by other users of the server.
+     */
+    private function createTemporaryFile(): string
+    {
+        $random = Str::random(40);
+        $path = sys_get_temp_dir()."/database-backup-{$random}.sql.gz";
+
+        File::put($path, '');
+        File::chmod($path, 0600);
+
+        return $path;
     }
 
     /**
@@ -179,7 +193,7 @@ class DatabaseBackup
                 ],
                 ['MYSQL_PWD' => $config('password')],
             ],
-            default => throw new RuntimeException("Backups support PostgreSQL, MySQL and MariaDB, not {$connection->getDriverName()}."),
+            default => throw new DatabaseBackupException("Backups support PostgreSQL, MySQL and MariaDB, not {$connection->getDriverName()}."),
         };
     }
 }

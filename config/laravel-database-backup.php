@@ -45,6 +45,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Timeout
+    |--------------------------------------------------------------------------
+    |
+    | How many seconds the dump may take before it is stopped and the run
+    | fails. The dump is written to the system temporary directory (TMPDIR)
+    | before it is uploaded, so that directory needs room for it.
+    |
+    */
+
+    'timeout' => (int) env('BACKUP_TIMEOUT', 3600),
+
+    /*
+    |--------------------------------------------------------------------------
     | Bucket
     |--------------------------------------------------------------------------
     |

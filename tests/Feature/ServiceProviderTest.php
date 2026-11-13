@@ -9,6 +9,7 @@ test('merges the package config and registers its private bucket as a disk', fun
     expect(config('laravel-database-backup.enabled'))->toBeFalse()
         ->and(config('laravel-database-backup.interval_hours'))->toBe(6)
         ->and(config('laravel-database-backup.keep_days'))->toBe(30)
+        ->and(config('laravel-database-backup.timeout'))->toBe(3600)
         ->and(config('filesystems.disks.'.DatabaseBackup::DISK))->toMatchArray(['driver' => 's3', 'visibility' => 'private', 'throw' => true]);
 });
 

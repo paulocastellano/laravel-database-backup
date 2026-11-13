@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use League\Flysystem\UnableToWriteFile;
 use PauloCastellano\DatabaseBackup\DatabaseBackup;
+use PauloCastellano\DatabaseBackup\Exceptions\DatabaseBackupException;
 
 beforeEach(function (): void {
     Storage::fake(DatabaseBackup::DISK);
@@ -90,10 +91,32 @@ test('a failed dump throws with the tool error, stores nothing and leaves no tem
     $temporaryFiles = temporaryBackupFiles();
     Process::fake(['*' => Process::result(errorOutput: 'connection refused', exitCode: 1)]);
 
-    expect(fn () => app(DatabaseBackup::class)->backup('backup_pgsql'))->toThrow(RuntimeException::class, 'connection refused');
+    expect(fn () => app(DatabaseBackup::class)->backup('backup_pgsql'))->toThrow(DatabaseBackupException::class, 'connection refused');
 
     expect(Storage::disk(DatabaseBackup::DISK)->allFiles())->toBeEmpty()
         ->and(temporaryBackupFiles())->toBe($temporaryFiles);
+});
+
+test('the dump is written to a temporary file only its owner can read', function (): void {
+    $permissions = null;
+    Process::fake(function () use (&$permissions) {
+        $permissions = fileperms((string) collect(temporaryBackupFiles())->last()) & 0777;
+
+        return Process::result(output: 'dump');
+    });
+
+    app(DatabaseBackup::class)->backup('backup_pgsql');
+
+    expect($permissions)->toBe(0600);
+})->skipOnWindows();
+
+test('stops a dump that takes longer than the configured timeout', function (): void {
+    config()->set('laravel-database-backup.timeout', 7200);
+    Process::fake(['*' => Process::result(output: 'dump')]);
+
+    app(DatabaseBackup::class)->backup('backup_pgsql');
+
+    Process::assertRan(fn (PendingProcess $process): bool => $process->timeout === 7200);
 });
 
 test('a failed upload throws and leaves no temporary file', function (): void {
@@ -111,7 +134,7 @@ test('refuses a database engine it cannot dump', function (): void {
     config()->set('database.connections.backup_sqlite', ['driver' => 'sqlite', 'database' => ':memory:']);
     Process::fake();
 
-    expect(fn () => app(DatabaseBackup::class)->backup('backup_sqlite'))->toThrow(RuntimeException::class, 'PostgreSQL, MySQL and MariaDB');
+    expect(fn () => app(DatabaseBackup::class)->backup('backup_sqlite'))->toThrow(DatabaseBackupException::class, 'PostgreSQL, MySQL and MariaDB');
 
     Process::assertNothingRan();
 });
@@ -120,7 +143,7 @@ test('refuses to back up without a bucket or a directory, before dumping anythin
     config()->set($setting, $value);
     Process::fake();
 
-    expect(fn () => app(DatabaseBackup::class)->backup('backup_pgsql'))->toThrow(RuntimeException::class, $variable);
+    expect(fn () => app(DatabaseBackup::class)->backup('backup_pgsql'))->toThrow(DatabaseBackupException::class, $variable);
 
     Process::assertNothingRan();
 })->with([
@@ -166,7 +189,7 @@ test('pruning refuses to run without a directory, so it never lists the root of 
     Storage::disk(DatabaseBackup::DISK)->put('notes.txt', 'another app');
     touch(Storage::disk(DatabaseBackup::DISK)->path('notes.txt'), now()->subDays(31)->getTimestamp());
 
-    expect(fn () => app(DatabaseBackup::class)->prune(now()))->toThrow(RuntimeException::class, 'BACKUP_DIRECTORY');
+    expect(fn () => app(DatabaseBackup::class)->prune(now()))->toThrow(DatabaseBackupException::class, 'BACKUP_DIRECTORY');
 
     expect(Storage::disk(DatabaseBackup::DISK)->exists('notes.txt'))->toBeTrue();
 });
