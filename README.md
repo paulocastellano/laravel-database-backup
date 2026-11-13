@@ -113,6 +113,17 @@ The restore test runs only against a real server. Point it at an empty PostgreSQ
 DB_CONNECTION=pgsql DB_HOST=127.0.0.1 DB_PORT=5432 DB_DATABASE=testing DB_USERNAME=postgres DB_PASSWORD= vendor/bin/pest
 ```
 
+## Built by Paulo Castellano
+
+<img src=".github/images/paulo.png" width="96" align="left" alt="Paulo Castellano">
+
+Hi, I'm Paulo. I built this package for [TryPost](https://trypost.it), where it backs up the production database every few hours. Follow me for what is coming next.
+
+<a href="https://www.linkedin.com/in/paulocastellano"><img src=".github/images/follow-linkedin.png" height="44" alt="Follow Paulo on LinkedIn"></a>&nbsp;
+<a href="https://x.com/paulocastellano"><img src=".github/images/follow-x.png" height="44" alt="Follow Paulo on X"></a>
+
+<br clear="left"/>
+
 ## Changelog
 
 Please see [CHANGELOG](CHANGELOG.md) for more information on what has changed recently.
